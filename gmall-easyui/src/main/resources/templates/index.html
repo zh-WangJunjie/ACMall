@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>easyui测试工程</title>
+    <link rel="stylesheet" type="text/css" href="/easyui/themes/default/easyui.css">
+    <link rel="stylesheet" type="text/css" href="/easyui/themes/icon.css">
+    <link rel="stylesheet" type="text/css" href="/easyui/demo.css">
+    <script type="text/javascript" src="/easyui/jquery.min.js"></script>
+    <script type="text/javascript" src="/easyui/jquery.easyui.min.js"></script>
+</head>
+<body class="easyui-layout">
+
+<div style="margin:20px 0;"></div>
+
+    <div data-options="region:'north',border:false"  style="height:70px;overflow:scroll;overflow-y:hidden;overflow-x:hidden;color:white;background-color: #0E2D5F">
+        <h1 align="center">库存管理系统</h1>
+    </div>
+    <div data-options="region:'south',split:true" style="height:50px;"></div>
+    <div data-options="region:'east',split:true" title="East" style="width:180px;">
+
+    </div>
+    <div data-options="region:'west',split:true" title="West" style="width:100px;">
+
+        <div style="margin:20px 0;">
+            <a href="javascript:;" class="easyui-linkbutton" onclick="toggle()">Toggle</a>
+        </div>
+        <div >
+            <a id="sm" class="easyui-sidemenu" data-options="data:data" href="javascript:;" onclick="selectOne()"></a>
+        </div>
+        <script type="text/javascript">
+            var data = [{
+                text: 'Item1',
+                iconCls: 'icon-sum',
+                state: 'open',
+                children: [{
+                    text: 'Option1',
+                },{
+                    text: 'Option2'
+                },{
+                    text: 'Option3',
+                    children: [{
+                        text: 'Option31'
+                    },{
+                        text: 'Option32'
+                    }]
+                }]
+            },{
+                text: 'Item2',
+                iconCls: 'icon-more',
+                children: [{
+                    text: 'Option4'
+                },{
+                    text: 'Option5'
+                },{
+                    text: 'Option6'
+                }]
+            }];
+
+            function toggle(){
+                var opts = $('#sm').sidemenu('options');
+                $('#sm').sidemenu(opts.collapsed ? 'expand' : 'collapse');
+                opts = $('#sm').sidemenu('options');
+                $('#sm').sidemenu('resize', {
+                    width: opts.collapsed ? 60 : 200
+                })
+            }
+
+            function selectOne(){
+                alert("99999")
+            }
+        </script>
+    </div>
+    <div data-options="region:'center',iconCls:'icon-ok'" title="Center" style="padding:5px">
+        <div class="easyui-layout" data-options="fit:true">
+            <div data-options="region:'north',split:true" style="height:50px"></div>
+            <div data-options="region:'west',split:true" style="width:100px"></div>
+            <div data-options="region:'center'"></div>
+        </div>
+    </div>
+
+</body>
+</html>

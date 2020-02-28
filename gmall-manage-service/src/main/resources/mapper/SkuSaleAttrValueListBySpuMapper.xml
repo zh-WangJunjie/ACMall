@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.atguigu.gmall.manage.mapper.SkuSaleAttrValueListBySpuMapper">
+    <select id="getSkuSaleAttrValueListBySpu" resultMap="PmsSkuSaleAttrValueMap">
+        SELECT
+            skv.*
+        FROM
+            pms_sku_info sk
+        INNER JOIN pms_sku_sale_attr_value skv ON sk.id = skv.sku_id
+        WHERE
+            sk.product_id = #{spuId}
+        ORDER BY
+            skv.sku_id,skv.sale_attr_id
+    </select>
+
+    <resultMap id="PmsSkuSaleAttrValueMap" type="com.atguigu.gmall.bean.PmsSkuSaleAttrValue" autoMapping="true">
+        <result property="id" column="id"></result>
+    </resultMap>
+
+</mapper>
