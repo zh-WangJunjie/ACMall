@@ -1,0 +1,272 @@
+package com.atguigu.gmall.cart.controller;
+
+import com.alibaba.dubbo.config.annotation.Reference;
+import com.alibaba.fastjson.JSON;
+import com.atguigu.gmall.annotation.LoginRequired;
+import com.atguigu.gmall.bean.OmsCartItem;
+import com.atguigu.gmall.bean.PmsSkuInfo;
+import com.atguigu.gmall.service.CartService;
+import com.atguigu.gmall.service.SpuService;
+import com.atguigu.gmall.util.CookieUtil;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.ModelMap;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+
+@Controller
+public class CartCotroller {
+    @Reference
+    private CartService cartService;
+    @Reference
+    private SpuService spuService;
+
+    /**
+     * 单条购物车数据选中
+     * 由于是异步请求，所以把它做成内嵌页，取消或选中只刷新这个内嵌页的数据
+     */
+    @RequestMapping("checkCart")
+    @LoginRequired(isNeededSuccess = false)
+    public String checkList(HttpServletRequest request,HttpServletResponse response,OmsCartItem omsCartItem,ModelMap modelMap) {
+        //String userId = "1";
+        String userId = (String)request.getAttribute("userId");
+        //声明一个购物车列表容器
+        List<OmsCartItem> omsCartItemList = new ArrayList<>();
+        //这个同样要判断用户的登录状态
+        if (StringUtils.isEmpty(userId)) {
+            //说明用户未登录，访问cookie
+            //先把cookie从浏览器中取出来
+            String cartList = CookieUtil.getCookieValue(request, "cartListCookie", true);
+            //排除cookie的null值可能性
+            if (!StringUtils.isEmpty(cartList)) {
+                //把cookie转换为list
+                omsCartItemList = JSON.parseArray(cartList, OmsCartItem.class);
+                //遍历这个list
+                for (OmsCartItem cartItem : omsCartItemList) {
+                    //先排除页面传来的omsCartItem的null值可能性
+                    if (omsCartItem != null){
+                        //根据id判断当前要修改的cartItem
+                        if (omsCartItem.getProductSkuId().equals(cartItem.getProductSkuId())){
+                            cartItem.setIsChecked("1");
+                        }
+                    }
+                }
+                //设置好购物车状态后，覆盖cookie
+                //覆盖浏览器中的cookie
+                CookieUtil.setCookie(request,response,
+                        "cartListCookie",
+                        JSON.toJSONString(omsCartItemList),
+                        60*60*24,
+                        true);
+            }
+
+        } else {
+            //设置userId
+            omsCartItem.setMemberId(userId);
+            //然后调用service更新一下购物车数据
+            cartService.updateCart(omsCartItem);
+            //最后将更新后的数据用userid取出来，放进list容器
+            omsCartItemList = cartService.getCartListByUserIdFromCache(userId);
+        }
+
+        //同样要对修改后的购物车进行页面重传
+        modelMap.put("cartList",omsCartItemList);
+        //购物车总金额合计也是一样要重传
+        modelMap.put("amount",getAmountForCart(omsCartItemList));
+        return "innerCartList";
+    }
+
+    /**
+     *添加到购物车后要展示购物车列表
+     * 该页面是一个内嵌页
+     */
+    @RequestMapping("cartList")
+    @LoginRequired(isNeededSuccess = false)
+    public String cartList(HttpServletRequest request, HttpServletResponse response, ModelMap map) {
+
+        //分析：展示购物车列表需考虑两种情况
+        //1、用户未登录，直接访问cookie
+        //2、用户已登录，访问redis缓存或者DB
+
+        //首先先声明一个购物车列表容器
+        List<OmsCartItem> omsCartItemList = new ArrayList<>();
+        //初始化一个userId做测试
+        //String userId = "1";
+        String userId = (String)request.getAttribute("userId");
+
+        //判断用户是否登录，就即是判断userId是否为空
+        if (StringUtils.isEmpty(userId)) {
+            //说明用户未登录，访问cookie
+            //用CookieUtil将浏览器的cookie取出来
+            String cartListCookie = CookieUtil.getCookieValue(request, "cartListCookie", true);
+            //排除cookie的null值可能性
+            if (!StringUtils.isEmpty(cartListCookie)){
+                //说明cookie不为空，将cookie转换成list，传递给购物车列表容器omsCartItemList
+                omsCartItemList = JSON.parseArray(cartListCookie,OmsCartItem.class);
+            }
+        } else {
+            //说明用户已登录，访问redis缓存或DB
+            //根据userId获取OmsCartItem
+            omsCartItemList = cartService.getCartListByUserIdFromCache(userId);
+            if (omsCartItemList != null && omsCartItemList.size()>0) {
+                //计算一下totalPrice
+                for (OmsCartItem omsCartItem : omsCartItemList) {
+                    omsCartItem.setTotalPrice(omsCartItem.getPrice().multiply(omsCartItem.getQuantity()));
+                }
+            } else {
+                //说明数据库中没有该用户的cart数据，需要将cookie中的数据提取出来，存入数据库
+                //提取cookie中的数据
+                String cartListCookie = CookieUtil.getCookieValue(request, "cartListCookie", true);
+                //排除cookie的null值可能性
+                if (!StringUtils.isEmpty(cartListCookie)){
+                    //说明cookie不为空，将cookie转换成list，传递给购物车列表容器omsCartItemList
+                    omsCartItemList = JSON.parseArray(cartListCookie,OmsCartItem.class);
+                    //存入数据库
+                    //cartService.addCart(omsCartItemList);
+                }
+            }
+        }
+        //把总金额合计独立出来，作为公共方法，并传给页面
+        BigDecimal amountForCart = getAmountForCart(omsCartItemList);
+        map.put("amount",amountForCart);
+        //把omsCartItemList传给页面
+        map.put("cartList",omsCartItemList);
+        return "cartList";
+    }
+
+    /**
+     *本方法用于计算购物车的总金额合计
+     */
+    private BigDecimal getAmountForCart(List<OmsCartItem> omsCartItemList) {
+        BigDecimal amountForCart = new BigDecimal("0");
+        if (omsCartItemList != null && omsCartItemList.size()>0) {
+            for (OmsCartItem omsCartItem : omsCartItemList) {
+                //计算合计之前先要判断一下该条购物车数据是否被选中，选中的才做累加计算
+                if ("1".equals(omsCartItem.getIsChecked())) {
+                    amountForCart = amountForCart.add(omsCartItem.getPrice().multiply(omsCartItem.getQuantity()));
+                }
+            }
+        }
+        return amountForCart;
+    }
+
+
+    /**
+     * 点击添加到购物车
+     * 加入购物车功能
+     */
+    @RequestMapping("addToCart")
+    @LoginRequired(isNeededSuccess = false)
+    public String addToCart(OmsCartItem omsCartItem, HttpServletRequest request, HttpServletResponse response) {
+        //初始化购物车（将商品sku信息存放在购物车中）
+        //先根据skuid将商品信息查出来
+        String productSkuId = omsCartItem.getProductSkuId();
+        PmsSkuInfo pmsSkuInfo =spuService.getProductBySkuId(productSkuId);
+
+        omsCartItem.setProductId(pmsSkuInfo.getProductId());
+        omsCartItem.setIsChecked("1");
+        omsCartItem.setTotalPrice(pmsSkuInfo.getPrice().multiply(omsCartItem.getQuantity()));
+        omsCartItem.setProductPic(pmsSkuInfo.getSkuDefaultImg());
+        omsCartItem.setProductName(pmsSkuInfo.getSkuName());
+        omsCartItem.setProductCategoryId(pmsSkuInfo.getCatalog3Id());
+        omsCartItem.setCreateDate(new Date());
+        omsCartItem.setPrice(pmsSkuInfo.getPrice());
+
+
+        //初始化userId用于测试
+        //String userId = "1";
+        String userId = (String)request.getAttribute("userId");
+
+        //初始化购物车列表集合容器，也便于将该集合塞到cookie里面
+        List<OmsCartItem> omsCartItemList = new ArrayList<>();
+        //添加购物车功能分析
+        //1、用户是否登录
+        if (!StringUtils.isEmpty(userId)) {
+            //1.1、用户已登录：db中该用户的购物车是否为空
+            //调用service层服务，根据联合主键查 memberid skuid
+            omsCartItem.setMemberId(userId);
+            omsCartItem.setProductSkuId(omsCartItem.getProductSkuId());
+            OmsCartItem omsCartItemFromDB = cartService.isCartItemExists(omsCartItem);
+            if (omsCartItemFromDB != null && (!StringUtils.isEmpty(omsCartItemFromDB.getId()))) {
+                //1.1.1、db购物车不为空，修改购物车
+                omsCartItemFromDB.setQuantity(omsCartItem.getQuantity());
+                omsCartItemFromDB.setTotalPrice(omsCartItem.getQuantity().multiply(omsCartItem.getPrice()));
+                cartService.updateCart(omsCartItemFromDB);
+            } else {
+                //1.1.2、db购物车为空，新增购物车，并接收DB返回的cart作为缓存处理
+                omsCartItem.setTotalPrice(omsCartItem.getPrice().multiply(omsCartItem.getQuantity()));
+                cartService.addCart(omsCartItem);
+            }
+            //1.1finally：将DB购物车数据放入redis缓存（同步缓存）
+            cartService.synchronizeCache(userId);
+
+        } else {
+            //1.2、用户未登录：浏览器中该用户的购物车cookie是否为空
+            //获取浏览器中的cookie
+            String cartListCookie = CookieUtil.getCookieValue(request, "cartListCookie", true);
+
+            if (StringUtils.isEmpty(cartListCookie)) {
+                //1.2.1、cookie为空 将浏览器传来的cart对象新增
+                omsCartItemList.add(omsCartItem);
+
+            } else {
+                //1.2.2、cookie不为空，判断cookie中的购物车与redis中的购物车是否相同
+                //先将cookie中的数据转换为list，然后遍历这个list，如果cart的id相同说明cart相同
+                omsCartItemList = JSON.parseArray(cartListCookie, OmsCartItem.class);
+                //将比较的方法提到外面去，成为公用方法hasSameCart(omsCartItemList,omsCartItem)
+                boolean result = hasSameCart(omsCartItemList,omsCartItem);
+                if (result) {
+                    //1.2.2.1、cookie中的购物车相同，修改购物车信息
+                    //先遍历cookie转换的list
+                    for (OmsCartItem cartItem : omsCartItemList) {
+                        //根据sku的id判断当前要修改的商品
+                        if (cartItem.getProductSkuId().equals(omsCartItem.getProductSkuId())){
+                            //能修改的地方就两个 totalPrice  quantity
+                            cartItem.setQuantity(omsCartItem.getQuantity().add(cartItem.getQuantity()));
+                            cartItem.setTotalPrice(cartItem.getPrice().multiply(cartItem.getQuantity()));
+                        }
+                    }
+                } else {
+                    //1.2.2.2、cookie中的购物车不相同，新增购物车信息
+                    omsCartItem.setTotalPrice(omsCartItem.getPrice().multiply(omsCartItem.getQuantity()));
+                    omsCartItemList.add(omsCartItem);
+                }
+            }
+            //覆盖浏览器中的cookie
+            CookieUtil.setCookie(request,response,
+                    "cartListCookie",
+                    JSON.toJSONString(omsCartItemList),
+                    60*60*24,
+                    true);
+        }
+        return "redirect:success.html";
+    }
+
+    /**
+     *
+     * @param omsCartItemList
+     * @param omsCartItem
+     * @return result
+     * 本方法用于判断浏览器cookie中的购物车信息 与 浏览器传来的omsCartItem购物车信息是否一致
+     */
+    private boolean hasSameCart(List<OmsCartItem> omsCartItemList, OmsCartItem omsCartItem) {
+        //声明结果变量
+        boolean result = false;
+
+        //先遍历list
+        for (OmsCartItem cartItem : omsCartItemList) {
+
+            //判断cart的id是否相同
+            if (omsCartItem.getProductSkuId().equals(cartItem.getProductSkuId())){
+                result = true;
+            }
+        }
+        return result;
+    }
+}
